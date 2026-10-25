@@ -53,6 +53,7 @@ class Trainer:
         is_local_vocoder: bool = False,  # use local path vocoder
         local_vocoder_path: str = "",  # local vocoder path
         model_cfg_dict: dict = dict(),  # training config
+        emo_lr_scale: float = 1.0,  # learning rate factor for emo_proj
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 
@@ -135,12 +136,18 @@ class Trainer:
 
         self.duration_predictor = duration_predictor
 
+        params = model.parameters()
+        if emo_lr_scale != 1.0:  # new layer starts at zero, give it its own learning rate
+            emo = [p for n, p in model.named_parameters() if "emo_proj" in n]
+            rest = [p for n, p in model.named_parameters() if "emo_proj" not in n]
+            params = [{"params": rest}, {"params": emo, "lr": learning_rate * emo_lr_scale}]
+
         if bnb_optimizer:
             import bitsandbytes as bnb
 
-            self.optimizer = bnb.optim.AdamW8bit(model.parameters(), lr=learning_rate)
+            self.optimizer = bnb.optim.AdamW8bit(params, lr=learning_rate)
         else:
-            self.optimizer = AdamW(model.parameters(), lr=learning_rate, fused=True)
+            self.optimizer = AdamW(params, lr=learning_rate, fused=True)
         self.model, self.optimizer = self.accelerator.prepare(self.model, self.optimizer)
 
     @property
