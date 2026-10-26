@@ -82,6 +82,17 @@ class HFDataset(Dataset):
         )
 
 
+def trim_silence(audio, sample_rate, threshold_db=-42.0, chunk_ms=10):
+    # cut leading and trailing 10 ms chunks below -42 dBFS, like remove_silence_edges in infer/utils_infer.py
+    chunk = sample_rate * chunk_ms // 1000
+    n = audio.shape[-1] // chunk
+    rms = audio[0, : n * chunk].reshape(n, chunk).pow(2).mean(-1).sqrt()
+    loud = torch.nonzero(20 * torch.log10(rms.clamp(min=1e-10)) >= threshold_db).flatten()
+    if len(loud) == 0:
+        return audio
+    return audio[:, loud[0] * chunk : (loud[-1] + 1) * chunk]
+
+
 class CustomDataset(Dataset):
     def __init__(
         self,
@@ -139,10 +150,14 @@ class CustomDataset(Dataset):
             return duration * self.target_sample_rate / self.hop_length
         return self.data[index]["duration"] * self.target_sample_rate / self.hop_length
 
-    def load_mel(self, row):
+    def load_mel(self, row, trim=False, pad_ms=0):
         if self.preprocessed_mel:
             return torch.tensor(row["mel_spec"])
         audio, source_sample_rate = torchaudio.load(row["audio_path"])
+        if trim:  # cut silent edges, as F5-TTS inference does with the reference audio
+            audio = trim_silence(audio, source_sample_rate)
+        if pad_ms:  # inference also appends 50 ms of silence to the trimmed reference
+            audio = F.pad(audio, (0, source_sample_rate * pad_ms // 1000))
 
         # make sure mono input
         if audio.shape[0] > 1:
@@ -176,13 +191,14 @@ class CustomDataset(Dataset):
 
             index = (index + 1) % len(self.data)
 
-        mel_spec = self.load_mel(row)
         emo_path = audio_path + ".emo.npy"  # optional emotion embedding saved next to the wav
         item = {}
-        if self.prompt_index is not None:  # prompt utterance in front, as at inference; only the target is masked
+        if self.prompt_index is None:
+            mel_spec = self.load_mel(row)
+        else:  # prompt utterance in front, as at inference; only the target is masked
             prompt = self.data[self.prompt_index[index]]
-            prompt_mel = self.load_mel(prompt)
-            mel_spec = torch.cat([prompt_mel, mel_spec], dim=-1)
+            prompt_mel = self.load_mel(prompt, trim=True, pad_ms=50)  # the reference as inference prepares it
+            mel_spec = torch.cat([prompt_mel, self.load_mel(row, trim=True)], dim=-1)  # target without silent edges
             text = prompt["text"] + [" "] + text
             item["prompt_frames"] = prompt_mel.shape[-1]
             emo_path = random.choice(self.emo_path[index]) + ".emo.npy"  # another utterance of the target emotion, new draw each time

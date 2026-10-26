@@ -8,16 +8,20 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 import torch
+import torch.nn.functional as F
+import torchaudio
 from cached_path import cached_path
 from hydra.utils import get_class
 from omegaconf import OmegaConf
 
 from f5_tts.infer.utils_infer import infer_process, load_model, load_vocoder, preprocess_ref_audio_text
+from f5_tts.model.dataset import trim_silence
 
 # listening test for the pilot: same prompt, same unseen sentence and same seed, only model and emotion vector change
 # usage: python listen_pilot.py <checkpoint .pt> <output dir> [emotion guidance strengths, e.g. 0 or 3,6] [duration: auto|neutral|oracle]
 #   auto:    standard F5-TTS inference, trimmed prompt and duration estimated from the prompt's speaking rate
-#   neutral: untrimmed prompt and plain prompt text as in cross-prompt training, length of the real neutral recording
+#   neutral: prompt prepared exactly as in cross-prompt training (silent edges cut, 50 ms added, original level, plain text),
+#            length of the real neutral recording without its silent edges
 #   oracle:  as neutral, but the length of the real recording in the emotion of the vector (ESD is parallel)
 ckpt, out = sys.argv[1], Path(sys.argv[2])
 strengths = [float(s) for s in sys.argv[3].split(",")] if len(sys.argv) > 3 else [0.0]
@@ -48,14 +52,21 @@ log = open(out / "manifest.txt", "w", encoding="utf-8")
 log.write(f"checkpoint {ckpt} | duration {mode}\n")
 
 
-def seconds(row):
-    return sf.info(str(root / row["relative_audio_path"])).duration
+def trimmed(row, pad_ms=0):  # same preparation as dataset.py for cross-prompt training
+    audio, sr = torchaudio.load(str(root / row["relative_audio_path"]))
+    return F.pad(trim_silence(audio, sr), (0, sr * pad_ms // 1000)), sr
+
+
+def seconds(row, pad_ms=0):
+    audio, sr = trimmed(row, pad_ms)
+    return audio.shape[-1] / sr
 
 
 def save(name, model, emo, ref_audio, ref_text, gen_text, emo_cfg_strength=0.0, fix_duration=None):
     torch.manual_seed(0)
     wave, sr, _ = infer_process(
-        ref_audio, ref_text, gen_text, model, vocoder, emo=emo, emo_cfg_strength=emo_cfg_strength, fix_duration=fix_duration
+        ref_audio, ref_text, gen_text, model, vocoder, emo=emo, emo_cfg_strength=emo_cfg_strength, fix_duration=fix_duration,
+        target_rms=0.1 if mode == "auto" else 0.0,  # training sees the original level, so no level change outside auto
     )
     sf.write(str(out / name), wave, sr)
 
@@ -69,14 +80,16 @@ for spk in speakers:
     for p in prompts:
         prompt = utts[(spk, p)][0]
         prompt_wav, prompt_text = str(root / prompt["relative_audio_path"]), prompt["transcription"].strip()
+        tag = f"{spk}_{p}prompt"
         if mode == "auto":
             ref_audio, ref_text = preprocess_ref_audio_text(prompt_wav, prompt_text)
             dur = {e: None for e in emotions}
+            shutil.copy(prompt_wav, out / f"{tag}_0_prompt.wav")
         else:  # infer_process adds one space after the prompt text, as the training separator
-            ref_audio, ref_text = prompt_wav, prompt_text
-            dur = {e: seconds(prompt) + seconds(target[e if mode == "oracle" else "neutral"]) for e in emotions}
-        tag = f"{spk}_{p}prompt"
-        shutil.copy(root / prompt["relative_audio_path"], out / f"{tag}_0_prompt.wav")
+            audio, sr = trimmed(prompt, pad_ms=50)
+            ref_audio, ref_text = str(out / f"{tag}_0_prompt.wav"), prompt_text
+            sf.write(ref_audio, audio[0].numpy(), sr)
+            dur = {e: seconds(prompt, pad_ms=50) + seconds(target[e if mode == "oracle" else "neutral"]) for e in emotions}
         save(f"{tag}_1_f5.wav", f5, None, ref_audio, ref_text, gen_text, fix_duration=dur["neutral"])
         save(f"{tag}_2_pilot_novec.wav", pilot, None, ref_audio, ref_text, gen_text, fix_duration=dur["neutral"])
         for w in strengths:  # files sort per guidance strength, then emotion
