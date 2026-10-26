@@ -10,7 +10,8 @@
 
 # same run as f5_pilot.sh, stopped after the first save at update 100
 # checks saving to the NAS, sample generation, tensorboard and that emo_proj trains
-EXP=ESD_en_smoke
+# usage: sbatch f5_pilot_smoke.sh [experiment name] [extra finetune_cli options, e.g. --emo_drop_prob 0.1]
+EXP=${1:-ESD_en_smoke}
 CK=/data/chi-gpu1/ge96xah/f5tts/thesis/F5-TTS/ckpts/$EXP  # symlink to the NAS
 
 direnv allow . && eval "$(direnv export bash)" || exit 1
@@ -22,7 +23,7 @@ cd /nas/student/DavidFrank/f5tts/runs/$EXP || exit 1  # tensorboard writes to ./
 
 ( while sleep 15; do echo "$(date +%T) $(ls -l $CK/ | grep '\.pt' | awk '{print $9, $5}' | xargs)"; done ) &  # save speed to the NAS
 MON=$!
-python /data/chi-gpu1/ge96xah/f5tts/thesis/F5-TTS/src/f5_tts/train/finetune_cli.py --exp_name F5TTS_v1_Base --dataset_name $EXP --finetune --pretrain /data/chi-gpu1/ge96xah/f5tts/thesis/F5-TTS/ckpts/ESD_en/pretrained_model_1250000.safetensors --tokenizer pinyin --batch_size_per_gpu 3200 --batch_size_type frame --max_samples 64 --learning_rate 1e-5 --emo_lr_scale 10 --num_warmup_updates 500 --epochs 5 --save_per_updates 100 --last_per_updates 100000 --keep_last_n_checkpoints -1 --log_samples --logger tensorboard &
+python /data/chi-gpu1/ge96xah/f5tts/thesis/F5-TTS/src/f5_tts/train/finetune_cli.py --exp_name F5TTS_v1_Base --dataset_name $EXP --finetune --pretrain /data/chi-gpu1/ge96xah/f5tts/thesis/F5-TTS/ckpts/ESD_en/pretrained_model_1250000.safetensors --tokenizer pinyin --batch_size_per_gpu 3200 --batch_size_type frame --max_samples 64 --learning_rate 1e-5 --emo_lr_scale 10 --num_warmup_updates 500 --epochs 5 --save_per_updates 100 --last_per_updates 100000 --keep_last_n_checkpoints -1 --log_samples --logger tensorboard "${@:2}" &
 PID=$!
 while kill -0 $PID 2>/dev/null && [ ! -f $CK/samples/update_100_ref.wav ]; do sleep 5; done
 sleep 10
