@@ -15,8 +15,9 @@ from omegaconf import OmegaConf
 from f5_tts.infer.utils_infer import infer_process, load_model, load_vocoder, preprocess_ref_audio_text
 
 # listening test for the pilot: same prompt, same unseen sentence and same seed, only model and emotion vector change
-# usage: python listen_pilot.py <pilot checkpoint .pt> <output dir>
+# usage: python listen_pilot.py <pilot checkpoint .pt> <output dir> [emotion guidance strengths, e.g. 0 or 3,6]
 ckpt, out = sys.argv[1], Path(sys.argv[2])
+strengths = [float(s) for s in sys.argv[3].split(",")] if len(sys.argv) > 3 else [0.0]
 root = Path("/data/chi-gpu1/ge96xah/data/ESD")
 speakers = ["0011", "0016"]
 emotions = ["neutral", "angry", "happy", "sad", "surprise"]
@@ -41,9 +42,9 @@ out.mkdir(parents=True, exist_ok=True)
 log = open(out / "manifest.txt", "w", encoding="utf-8")
 
 
-def save(name, model, emo, ref_audio, ref_text, gen_text):
+def save(name, model, emo, ref_audio, ref_text, gen_text, emo_cfg_strength=0.0):
     torch.manual_seed(0)
-    wave, sr, _ = infer_process(ref_audio, ref_text, gen_text, model, vocoder, emo=emo)
+    wave, sr, _ = infer_process(ref_audio, ref_text, gen_text, model, vocoder, emo=emo, emo_cfg_strength=emo_cfg_strength)
     sf.write(str(out / name), wave, sr)
 
 
@@ -59,8 +60,9 @@ for spk in speakers:
         shutil.copy(root / prompt["relative_audio_path"], out / f"{tag}_0_prompt.wav")
         save(f"{tag}_1_f5.wav", f5, None, ref_audio, ref_text, gen_text)
         save(f"{tag}_2_pilot_novec.wav", pilot, None, ref_audio, ref_text, gen_text)
-        for i, e in enumerate(emotions):
-            save(f"{tag}_{i + 3}_pilot_{e}vec.wav", pilot, vecs[e], ref_audio, ref_text, gen_text)
+        for w in strengths:  # files sort per guidance strength, then emotion
+            for i, e in enumerate(emotions):
+                save(f"{tag}_g{w:g}_{i + 3}_pilot_{e}vec.wav", pilot, vecs[e], ref_audio, ref_text, gen_text, w)
         log.write(f"{tag}: prompt {prompt['relative_audio_path']} | text: {gen_text}\n")
     log.write(f"{spk} vectors: " + ", ".join(f"{e} {r['relative_audio_path']}" for e, r in vec_rows.items()) + "\n")
 log.close()

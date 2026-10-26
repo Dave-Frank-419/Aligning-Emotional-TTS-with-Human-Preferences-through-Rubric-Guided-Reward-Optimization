@@ -399,6 +399,7 @@ def infer_process(
     fix_duration=fix_duration,
     device=device,
     emo=None,  # emotion embedding, 1 1024
+    emo_cfg_strength=0.0,  # extra guidance towards emo, 0 = off
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
@@ -432,6 +433,7 @@ def infer_process(
             fix_duration=fix_duration,
             device=device,
             emo=emo,
+            emo_cfg_strength=emo_cfg_strength,
         )
     )
 
@@ -458,6 +460,7 @@ def infer_batch_process(
     streaming=False,
     chunk_size=2048,
     emo=None,  # emotion embedding, 1 1024
+    emo_cfg_strength=0.0,  # extra guidance towards emo, 0 = off
 ):
     audio, sr = ref_audio
     if audio.shape[0] > 1:
@@ -517,6 +520,7 @@ def infer_batch_process(
                 cfg_strength=cfg_strength,
                 sway_sampling_coef=sway_sampling_coef,
                 emo=emo,
+                emo_cfg_strength=emo_cfg_strength,
             )
             del _
 

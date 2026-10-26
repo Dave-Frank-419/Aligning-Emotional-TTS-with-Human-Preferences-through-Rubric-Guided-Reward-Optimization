@@ -100,6 +100,7 @@ class CFM(nn.Module):
         t_inter=0.1,
         edit_mask=None,
         emo=None,  # emotion embedding, b 1024
+        emo_cfg_strength=0.0,  # extra guidance towards the emotion embedding, 0 = off
     ):
         self.eval()
         # raw wave
@@ -191,7 +192,21 @@ class CFM(nn.Module):
                 emo=emo,
             )
             pred, null_pred = torch.chunk(pred_cfg, 2, dim=0)
-            return pred + (pred - null_pred) * cfg_strength
+            out = pred + (pred - null_pred) * cfg_strength
+            if emo is not None and emo_cfg_strength > 0:  # same condition without emotion, no cache (it holds the emo text)
+                noemo_pred = self.transformer(
+                    x=x,
+                    cond=step_cond,
+                    text=text,
+                    time=t,
+                    mask=mask,
+                    drop_audio_cond=False,
+                    drop_text=False,
+                    cache=False,
+                    emo=None,
+                )
+                out = out + (pred - noemo_pred) * emo_cfg_strength
+            return out
 
         # noise input
         # to make sure batch inference result is same with different batch size, and for sure single inference
