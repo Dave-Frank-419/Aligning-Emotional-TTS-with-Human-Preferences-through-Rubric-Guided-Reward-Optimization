@@ -388,6 +388,7 @@ class Trainer:
                         lens=mel_lengths,
                         noise_scheduler=self.noise_scheduler,
                         emo=batch.get("emo"),  # None without .emo.npy files
+                        prompt_frames=batch.get("prompt_frames"),  # None without cross-emotion prompts
                     )
                     self.accelerator.backward(loss)
 
@@ -425,11 +426,15 @@ class Trainer:
                         infer_text = [
                             text_inputs[0] + ([" "] if isinstance(text_inputs[0], list) else " ") + text_inputs[0]
                         ]
+                        duration, ref_end = ref_audio_len * 2, ref_audio_len
+                        if "prompt_frames" in batch:  # generate the target after the other-emotion prompt; ref = prompt + real target
+                            ref_audio_len, infer_text = batch["prompt_frames"][0], [text_inputs[0]]
+                            duration = ref_end = mel_lengths[0]
                         with torch.inference_mode(), self.accelerator.autocast():
                             generated, _ = self.accelerator.unwrap_model(self.model).sample(
                                 cond=mel_spec[0][:ref_audio_len].unsqueeze(0),
                                 text=infer_text,
-                                duration=ref_audio_len * 2,
+                                duration=duration,
                                 steps=nfe_step,
                                 cfg_strength=cfg_strength,
                                 sway_sampling_coef=sway_sampling_coef,
@@ -437,7 +442,7 @@ class Trainer:
                             )
                             generated = generated.to(torch.float32)
                             gen_mel_spec = generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)
-                            ref_mel_spec = batch["mel"][0, :, :ref_audio_len].unsqueeze(0)
+                            ref_mel_spec = batch["mel"][0, :, :ref_end].unsqueeze(0)
                             if self.vocoder_name == "vocos":
                                 gen_audio = vocoder.decode(gen_mel_spec).cpu()
                                 ref_audio = vocoder.decode(ref_mel_spec).cpu()

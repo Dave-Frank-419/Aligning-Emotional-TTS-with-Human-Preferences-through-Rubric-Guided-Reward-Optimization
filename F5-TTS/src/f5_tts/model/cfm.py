@@ -43,6 +43,7 @@ class CFM(nn.Module):
         ),
         audio_drop_prob=0.3,
         cond_drop_prob=0.2,
+        emo_drop_prob=0.0,  # drop only the emotion embedding, so that "prompt + text, no emotion" is learned
         num_channels=None,
         mel_spec_module: nn.Module | None = None,
         mel_spec_kwargs: dict = dict(),
@@ -61,6 +62,7 @@ class CFM(nn.Module):
         # classifier-free guidance
         self.audio_drop_prob = audio_drop_prob
         self.cond_drop_prob = cond_drop_prob
+        self.emo_drop_prob = emo_drop_prob
 
         # transformer
         self.transformer = transformer
@@ -254,6 +256,7 @@ class CFM(nn.Module):
         lens: int["b"] | None = None,
         noise_scheduler: str | None = None,
         emo=None,  # emotion embedding, b 1024
+        prompt_frames=None,  # b, length of a separate prompt utterance in front; everything after it is masked
     ):
         # handle raw wave
         if inp.ndim == 2:
@@ -279,6 +282,8 @@ class CFM(nn.Module):
         # get a random span to mask out for training conditionally
         frac_lengths = torch.zeros((batch,), device=self.device).float().uniform_(*self.frac_lengths_mask)
         rand_span_mask = mask_from_frac_lengths(lens, frac_lengths)
+        if exists(prompt_frames):  # mask the whole target, keep the whole prompt
+            rand_span_mask = torch.arange(seq_len, device=device)[None, :] >= prompt_frames.to(device)[:, None]
 
         if exists(mask):
             rand_span_mask &= mask
@@ -308,6 +313,8 @@ class CFM(nn.Module):
             drop_text = True
         else:
             drop_text = False
+        if self.emo_drop_prob > 0 and exists(emo) and not drop_text and random() < self.emo_drop_prob:
+            emo = None  # no random draw at 0, so runs without it stay unchanged
 
         # apply mask will use more memory; might adjust batchsize or batchsampler long sequence threshold
         pred = self.transformer(

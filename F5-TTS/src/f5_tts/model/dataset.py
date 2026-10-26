@@ -1,5 +1,6 @@
 import json
 import os
+import random
 from importlib.resources import files
 
 import numpy as np
@@ -94,6 +95,7 @@ class CustomDataset(Dataset):
         mel_spec_type="vocos",
         preprocessed_mel=False,
         mel_spec_module: nn.Module | None = None,
+        pairs: dict | None = None,  # target audio_path -> [prompt audio_path, [emo source audio_paths]]
     ):
         self.data = custom_dataset
         self.durations = durations
@@ -118,12 +120,45 @@ class CustomDataset(Dataset):
             )
         self._resamplers = {}
 
+        # cross-emotion prompts: a separate prompt utterance is put in front of each target
+        self.prompt_index, self.emo_path = None, None
+        if pairs is not None:
+            row_of = {p: i for i, p in enumerate(self.data["audio_path"])}
+            self.prompt_index = [row_of[pairs[p][0]] for p in self.data["audio_path"]]
+            self.emo_path = [pairs[p][1] for p in self.data["audio_path"]]
+            missing = [p for c in self.emo_path for p in c if not os.path.exists(p + ".emo.npy")]
+            assert not missing, f"emotion sources without .emo.npy, e.g. {missing[:3]}"  # else collate drops emo silently
+
     def get_frame_len(self, index):
         if (
             self.durations is not None
         ):  # Please make sure the separately provided durations are correct, otherwise 99.99% OOM
-            return self.durations[index] * self.target_sample_rate / self.hop_length
+            duration = self.durations[index]
+            if self.prompt_index is not None:  # prompt and target together
+                duration += self.durations[self.prompt_index[index]]
+            return duration * self.target_sample_rate / self.hop_length
         return self.data[index]["duration"] * self.target_sample_rate / self.hop_length
+
+    def load_mel(self, row):
+        if self.preprocessed_mel:
+            return torch.tensor(row["mel_spec"])
+        audio, source_sample_rate = torchaudio.load(row["audio_path"])
+
+        # make sure mono input
+        if audio.shape[0] > 1:
+            audio = torch.mean(audio, dim=0, keepdim=True)
+
+        # resample if necessary
+        if source_sample_rate != self.target_sample_rate:
+            if source_sample_rate not in self._resamplers:
+                self._resamplers[source_sample_rate] = torchaudio.transforms.Resample(
+                    source_sample_rate, self.target_sample_rate
+                )
+            audio = self._resamplers[source_sample_rate](audio)
+
+        # to mel spectrogram
+        mel_spec = self.mel_spectrogram(audio)
+        return mel_spec.squeeze(0)  # '1 d t -> d t'
 
     def __len__(self):
         return len(self.data)
@@ -141,33 +176,21 @@ class CustomDataset(Dataset):
 
             index = (index + 1) % len(self.data)
 
-        if self.preprocessed_mel:
-            mel_spec = torch.tensor(row["mel_spec"])
-        else:
-            audio, source_sample_rate = torchaudio.load(audio_path)
+        mel_spec = self.load_mel(row)
+        emo_path = audio_path + ".emo.npy"  # optional emotion embedding saved next to the wav
+        item = {}
+        if self.prompt_index is not None:  # prompt utterance in front, as at inference; only the target is masked
+            prompt = self.data[self.prompt_index[index]]
+            prompt_mel = self.load_mel(prompt)
+            mel_spec = torch.cat([prompt_mel, mel_spec], dim=-1)
+            text = prompt["text"] + [" "] + text
+            item["prompt_frames"] = prompt_mel.shape[-1]
+            emo_path = random.choice(self.emo_path[index]) + ".emo.npy"  # another utterance of the target emotion, new draw each time
 
-            # make sure mono input
-            if audio.shape[0] > 1:
-                audio = torch.mean(audio, dim=0, keepdim=True)
-
-            # resample if necessary
-            if source_sample_rate != self.target_sample_rate:
-                if source_sample_rate not in self._resamplers:
-                    self._resamplers[source_sample_rate] = torchaudio.transforms.Resample(
-                        source_sample_rate, self.target_sample_rate
-                    )
-                audio = self._resamplers[source_sample_rate](audio)
-
-            # to mel spectrogram
-            mel_spec = self.mel_spectrogram(audio)
-            mel_spec = mel_spec.squeeze(0)  # '1 d t -> d t'
-
-        item = {
-            "mel_spec": mel_spec,
-            "text": text,
-        }
-        if os.path.exists(audio_path + ".emo.npy"):  # optional emotion embedding saved next to the wav
-            item["emo"] = torch.from_numpy(np.load(audio_path + ".emo.npy")).float()
+        item["mel_spec"] = mel_spec
+        item["text"] = text
+        if os.path.exists(emo_path):
+            item["emo"] = torch.from_numpy(np.load(emo_path)).float()
         return item
 
 
@@ -278,11 +301,16 @@ def load_dataset(
         with open(f"{rel_data_path}/duration.json", "r", encoding="utf-8") as f:
             data_dict = json.load(f)
         durations = data_dict["duration"]
+        pairs = None
+        if os.path.exists(f"{rel_data_path}/pairs.json"):  # optional cross-emotion prompts, see scripts/make_xprompt_pairs.py
+            with open(f"{rel_data_path}/pairs.json", "r", encoding="utf-8") as f:
+                pairs = json.load(f)
         train_dataset = CustomDataset(
             train_dataset,
             durations=durations,
             preprocessed_mel=preprocessed_mel,
             mel_spec_module=mel_spec_module,
+            pairs=pairs,
             **mel_spec_kwargs,
         )
 
@@ -339,4 +367,6 @@ def collate_fn(batch):
     )
     if all("emo" in item for item in batch):  # emotion embeddings, b 1024
         out["emo"] = torch.stack([item["emo"] for item in batch])
+    if all("prompt_frames" in item for item in batch):  # frames of the separate prompt utterance, b
+        out["prompt_frames"] = torch.LongTensor([item["prompt_frames"] for item in batch])
     return out
