@@ -17,8 +17,12 @@ CK=/data/chi-gpu1/ge96xah/f5tts/thesis/F5-TTS/ckpts/$EXP  # symlink to the NAS
 
 direnv allow . && eval "$(direnv export bash)" || exit 1
 export ACCELERATE_MIXED_PRECISION=no
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True  # varying batch shapes otherwise fragment the 12 GB
 python -c "import f5_tts.model.backbones.dit as d; print(d.__file__); assert '/thesis/F5-TTS/src/' in d.__file__" || exit 1
 python -c "import tensorboard" || exit 1
 ls -la $CK/ || exit 1
 cd /nas/student/DavidFrank/f5tts/runs/$EXP || exit 1  # tensorboard writes to ./runs
+nvidia-smi --query-gpu=timestamp,memory.used,memory.total --format=csv -l 30 > /nas/student/DavidFrank/f5tts/logs/gpu_mem_$SLURM_JOB_ID.csv &
+SMI=$!
 python /data/chi-gpu1/ge96xah/f5tts/thesis/F5-TTS/src/f5_tts/train/finetune_cli.py --exp_name F5TTS_v1_Base --dataset_name $EXP --finetune --pretrain /data/chi-gpu1/ge96xah/f5tts/thesis/F5-TTS/ckpts/ESD_en/pretrained_model_1250000.safetensors --tokenizer pinyin --batch_size_per_gpu 3200 --batch_size_type frame --max_samples 64 --learning_rate 1e-5 --emo_lr_scale 10 --num_warmup_updates 500 --epochs 5 --save_per_updates $SAVE --last_per_updates 100000 --keep_last_n_checkpoints -1 --log_samples --logger tensorboard "${@:3}"
+kill $SMI

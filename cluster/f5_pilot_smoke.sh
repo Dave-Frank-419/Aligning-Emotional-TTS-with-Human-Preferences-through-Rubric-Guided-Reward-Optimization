@@ -16,6 +16,7 @@ CK=/data/chi-gpu1/ge96xah/f5tts/thesis/F5-TTS/ckpts/$EXP  # symlink to the NAS
 
 direnv allow . && eval "$(direnv export bash)" || exit 1
 export ACCELERATE_MIXED_PRECISION=no
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True  # varying batch shapes otherwise fragment the 12 GB
 python -c "import f5_tts.model.backbones.dit as d; print(d.__file__); assert '/thesis/F5-TTS/src/' in d.__file__" || exit 1
 python -c "import tensorboard" || exit 1
 ls -la $CK/ || exit 1
