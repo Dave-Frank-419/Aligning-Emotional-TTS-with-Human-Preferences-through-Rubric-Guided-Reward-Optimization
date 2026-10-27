@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument("--learning_rate", type=float, default=1e-5, help="Learning rate for training")
     parser.add_argument("--emo_lr_scale", type=float, default=1.0, help="Learning rate factor for emo_proj")
     parser.add_argument("--emo_drop_prob", type=float, default=0.0, help="Probability to drop only the emotion embedding")
+    parser.add_argument("--ema_on_cpu", action="store_true", help="Keep the EMA copy in CPU memory")
     parser.add_argument("--batch_size_per_gpu", type=int, default=3200, help="Batch size per GPU")
     parser.add_argument(
         "--batch_size_type", type=str, default="frame", choices=["frame", "sample"], help="Batch size type"
@@ -204,6 +205,7 @@ def main():
         last_per_updates=args.last_per_updates,
         bnb_optimizer=args.bnb_optimizer,
         emo_lr_scale=args.emo_lr_scale,
+        ema_on_cpu=args.ema_on_cpu,
     )
 
     train_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)

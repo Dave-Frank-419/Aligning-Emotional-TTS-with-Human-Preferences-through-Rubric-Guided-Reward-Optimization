@@ -54,6 +54,7 @@ class Trainer:
         local_vocoder_path: str = "",  # local vocoder path
         model_cfg_dict: dict = dict(),  # training config
         emo_lr_scale: float = 1.0,  # learning rate factor for emo_proj
+        ema_on_cpu: bool = False,  # keep the EMA copy in CPU memory, frees about 1.3 GB on the GPU
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 
@@ -105,8 +106,9 @@ class Trainer:
         self.model = model
 
         if self.is_main:
-            self.ema_model = EMA(model, include_online_model=False, **ema_kwargs)
-            self.ema_model.to(self.accelerator.device)
+            self.ema_model = EMA(model, include_online_model=False, allow_different_devices=ema_on_cpu, **ema_kwargs)
+            if not ema_on_cpu:  # otherwise the copy stays on the CPU and updates move the weights over
+                self.ema_model.to(self.accelerator.device)
 
             print(f"Using logger: {logger}")
             if grad_accumulation_steps > 1:
