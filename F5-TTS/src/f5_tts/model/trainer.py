@@ -55,6 +55,7 @@ class Trainer:
         model_cfg_dict: dict = dict(),  # training config
         emo_lr_scale: float = 1.0,  # learning rate factor for emo_proj
         ema_on_cpu: bool = False,  # keep the EMA copy in CPU memory, frees about 1.3 GB on the GPU
+        constant_lr: bool = False,  # keep the learning rate at its peak after warm-up instead of decaying it to 0
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 
@@ -118,6 +119,7 @@ class Trainer:
 
         self.epochs = epochs
         self.num_warmup_updates = num_warmup_updates
+        self.constant_lr = constant_lr
         self.save_per_updates = save_per_updates
         self.keep_last_n_checkpoints = keep_last_n_checkpoints
         self.last_per_updates = default(last_per_updates, save_per_updates)
@@ -333,7 +335,10 @@ class Trainer:
         total_updates = math.ceil(len(train_dataloader) / self.grad_accumulation_steps) * self.epochs
         decay_updates = total_updates - warmup_updates
         warmup_scheduler = LinearLR(self.optimizer, start_factor=1e-8, end_factor=1.0, total_iters=warmup_updates)
-        decay_scheduler = LinearLR(self.optimizer, start_factor=1.0, end_factor=1e-8, total_iters=decay_updates)
+        # constant_lr: every epoch learns as much as the first, so a longer run is not cut short by the decay
+        end_factor = 1.0 if self.constant_lr else 1e-8
+        decay_scheduler = LinearLR(self.optimizer, start_factor=1.0, end_factor=end_factor, total_iters=decay_updates)
+        print(f"lr: warm-up {warmup_updates} updates, then {'constant' if self.constant_lr else 'linear decay to 0'} for {decay_updates}")
         self.scheduler = SequentialLR(
             self.optimizer, schedulers=[warmup_scheduler, decay_scheduler], milestones=[warmup_updates]
         )
