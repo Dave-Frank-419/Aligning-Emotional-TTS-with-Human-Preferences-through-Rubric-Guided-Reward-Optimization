@@ -11,8 +11,11 @@ import soundfile as sf
 # make:  python make_blind_test.py make <arm dir> <test dir> [clips per emotion, default 15]
 #        <test dir>/clips/blind_NN.wav at the same loudness and answers.csv to fill in; only this folder is copied to listen,
 #        the solution goes to <parent>/blind_keys/<test name>.csv
+# best:  python make_blind_test.py best <arm dir> <test dir> <key of an earlier test> [clips per emotion, default 5] [shortest, default 2 s]
+#        as make, but per emotion the clips both judges rate highest, as a reward would pick them; clips of the earlier test
+#        and very short ones are left out. Shows whether the arm can render an emotion at all, not whether it does so reliably
 # score: python make_blind_test.py score <key.csv> <filled answers.csv>   (answer per clip: angry, happy or surprise)
-# with 45 clips, 21 or more correct is above chance (one-sided p < 0.05)
+# with 45 clips, 21 or more correct is above chance (one-sided p < 0.05); with 15 clips, 9 or more
 triad = ["angry", "happy", "surprise"]
 
 
@@ -22,17 +25,33 @@ def rows(path):  # also as saved by Excel: BOM and ';' as separator
     return list(csv.DictReader(text.splitlines(), delimiter=";" if ";" in text.splitlines()[0] else ","))
 
 
-if sys.argv[1] == "make":
+def share(scores, emotion, rename={}):  # probability of the emotion among the three
+    p = {e: float(scores[rename.get(e, e)]) + 1e-12 for e in triad}
+    return p[emotion] / sum(p.values())
+
+
+if sys.argv[1] in ["make", "best"]:
     arm, test = Path(sys.argv[2]), Path(sys.argv[3])
-    n = int(sys.argv[4]) if len(sys.argv) > 4 else 15
-    with open(arm / "manifest.csv", encoding="utf-8", newline="") as f:
-        items = [r for r in csv.DictReader(f) if r["emotion"] in triad]
-    rng = random.Random(0)  # the same items in every test, so tests of different checkpoints stay comparable
+    items = [r for r in rows(arm / "manifest.csv") if r["emotion"] in triad]
     chosen = []
-    for e in triad:
-        c = [r for r in items if r["emotion"] == e]
-        rng.shuffle(c)
-        chosen += c[:n]
+    if sys.argv[1] == "make":
+        n = int(sys.argv[4]) if len(sys.argv) > 4 else 15
+        rng = random.Random(0)  # the same items in every test, so tests of different checkpoints stay comparable
+        for e in triad:
+            c = [r for r in items if r["emotion"] == e]
+            rng.shuffle(c)
+            chosen += c[:n]
+    else:
+        heard = {r["path"] for r in rows(sys.argv[4])}
+        n = int(sys.argv[5]) if len(sys.argv) > 5 else 5
+        shortest = float(sys.argv[6]) if len(sys.argv) > 6 else 2.0
+        wavlm = {r["path"]: r for r in rows(arm / "scores_wavlm.csv")}
+        e2v = {r["path"]: r for r in rows(arm / "scores_e2v.csv")}
+        for e in triad:
+            c = [r for r in items if r["emotion"] == e and r["path"] not in heard and float(r["seconds"]) >= shortest]
+            print(e, len(c), "clips to choose from")
+            c.sort(key=lambda r: share(wavlm[r["path"]], e) + share(e2v[r["path"]], e, {"surprise": "surprised"}), reverse=True)
+            chosen += c[:n]
     random.Random(test.name).shuffle(chosen)  # but each test in its own order, nothing to remember from an earlier test
     (test / "clips").mkdir(parents=True, exist_ok=False)  # never overwrite a test that may have been listened to
     key = []
