@@ -6,17 +6,17 @@ from pathlib import Path
 
 import numpy as np
 
-# compares the arms of the triad evaluation (experiments/emotion_a/eval_triad_generate.py) item by item, for each judge
-#   triad:    angry/happy/surprise items, decided among these three classes only (chance 1/3), Wilson 95 % interval
-#   pairs:    same speaker and sentence, does the angry item get more "angry" than the happy item, and vice versa (chance 0.5)
-#   vs ref:   McNemar on the triad items, b = only this arm right, c = only the reference right
-#   rel:      (triad - 1/3) / (vocoded - 1/3), the share of what the vocoded recordings reach
-#   S-N:      control, the same pairwise test for sad vs neutral
+# compares the arms of the emotion evaluation (experiments/emotion_a/eval_triad_generate.py) item by item, for each judge,
+# always over all five emotions
+#   5-way:    every item decided among the five emotions (chance 0.2), Wilson 95 % interval, recall per emotion
+#   pairs:    same speaker and sentence, emotions a and b: does the a item get more "a" than the b item, and vice versa
+#             (chance 0.5); compares the raw scores, just as a reward would; mean over the ten pairs, each pair below
+#   vs ref:   McNemar on the 5-way hits, b = only this arm right, c = only the reference right
+#   rel:      (5-way - 0.2) / (vocoded - 0.2), the share of what the vocoded recordings reach
 # usage: python eval_triad_report.py <evaluation dir> [reference arm, e.g. pilotB_13095]
 ev, ref = Path(sys.argv[1]), (sys.argv[2] if len(sys.argv) > 2 else None)
 emotions = ["neutral", "angry", "happy", "sad", "surprise"]
-triad = ["angry", "happy", "surprise"]
-judges = {"e2v": ("scores_e2v.csv", {"surprise": "surprised"}), "wavlm": ("scores_wavlm.csv", {})}
+judges = {"e2v": ("scores_e2v.csv", {"surprise": "surprised"}), "wavlm": ("scores_wavlm.csv", {}), "llm": ("scores_llm.csv", {})}
 
 
 def read(path):
@@ -38,41 +38,26 @@ def mcnemar(b, c):  # exact two-sided
 def analyse(items, scores, rename):
     P = np.array([[float(scores[it["path"]][rename.get(e, e)]) for e in emotions] for it in items])
     y = np.array([emotions.index(it["emotion"]) for it in items])
-    idx = [emotions.index(e) for e in triad]
-    t = np.isin(y, idx)
-    P3 = (P[t][:, idx] + 1e-12) / (P[t][:, idx] + 1e-12).sum(1, keepdims=True)  # a judge sure of sad can leave all three at 0
-    y3 = np.array([idx.index(v) for v in y[t]])
-    hit = P3.argmax(1) == y3
-    r = {"n": int(t.sum()), "triad": float(hit.mean()), "triad_ci": wilson(int(hit.sum()), len(hit))}
-    r["recall"] = {e: float(hit[y3 == i].mean()) for i, e in enumerate(triad)}
-    r["confusion"] = [[int(((y3 == a) & (P3.argmax(1) == b)).sum()) for b in range(3)] for a in range(3)]
-    sad = emotions.index("sad")  # control: pilot B already renders sad
-    r["sad_recall_5way"] = float((P.argmax(1)[y == sad] == sad).mean())
-    r["5-way"] = float((P.argmax(1) == y).mean())
+    hit = P.argmax(1) == y
+    r = {"n": len(items), "5-way": float(hit.mean()), "5-way_ci": wilson(int(hit.sum()), len(hit))}
+    r["recall"] = {e: float(hit[y == i].mean()) for i, e in enumerate(emotions)}
+    r["confusion"] = [[int(((y == a) & (P.argmax(1) == b)).sum()) for b in range(5)] for a in range(5)]  # row intended, column heard
     if rename:  # emotion2vec+: plain argmax over all 9 classes, as reported in EMORL-TTS
         full = [max((k for k in scores[it["path"]] if k != "path"), key=lambda k: float(scores[it["path"]][k])) for it in items]
         r["9-way_recall"] = {e: float(np.mean([f == rename.get(e, e) for f, it in zip(full, items) if it["emotion"] == e])) for e in emotions}
-    tri_items = [it for it in items if it["emotion"] in triad]
-    r["hits"] = {(it["speaker"], it["sentence"], it["emotion"]): bool(h) for it, h in zip(tri_items, hit)}
-    p3 = {(it["speaker"], it["sentence"], it["emotion"]): p for it, p in zip(tri_items, P3)}
+    keys = [(it["speaker"], it["sentence"], it["emotion"]) for it in items]
+    r["hits"], p = dict(zip(keys, hit.tolist())), dict(zip(keys, P))
     r["pairs"] = {}
-    for a, b in [("angry", "happy"), ("angry", "surprise"), ("happy", "surprise")]:
-        ia, ib = triad.index(a), triad.index(b)
-        wins = []
-        for (s, n, e), pa in p3.items():
-            if e == a and (s, n, b) in p3:
-                pb = p3[(s, n, b)]
-                wins += [pa[ia] > pb[ia], pb[ib] > pa[ib]]
-        r["pairs"][f"{a[0].upper()}-{b[0].upper()}"] = float(np.mean(wins)) if wins else float("nan")
-    # control, same speaker and sentence: is the sad item more "sad" and the neutral item more "neutral" (chance 0.5);
-    # stricter than sad recall, which a judge that calls everything sad would pass
-    neu, p5, wins = emotions.index("neutral"), {(it["speaker"], it["sentence"], it["emotion"]): p for it, p in zip(items, P)}, []
-    for (s, n, e), ps in p5.items():
-        if e == "sad" and (s, n, "neutral") in p5:
-            wins += [ps[sad] > p5[(s, n, "neutral")][sad], p5[(s, n, "neutral")][neu] > ps[neu]]
-    r["sad-neutral_pair"] = float(np.mean(wins)) if wins else float("nan")
-    # the items are not independent (18 per speaker), so the spread over speakers matters more than the interval
-    r["per_speaker"] = {s: float(np.mean([h for k, h in r["hits"].items() if k[0] == s])) for s in sorted({k[0] for k in r["hits"]})}
+    for ia, a in enumerate(emotions):
+        for ib in range(ia + 1, len(emotions)):
+            b, wins = emotions[ib], []
+            for (s, n, e), pa in p.items():
+                if e == a and (s, n, b) in p:
+                    wins += [pa[ia] > p[(s, n, b)][ia], p[(s, n, b)][ib] > pa[ib]]
+            r["pairs"][f"{a}-{b}"] = float(np.mean(wins)) if wins else float("nan")
+    r["pairs_mean"] = float(np.mean(list(r["pairs"].values())))
+    # the items are not independent (30 per speaker), so the spread over speakers matters more than the interval
+    r["per_speaker"] = {s: float(np.mean([h for k, h in r["hits"].items() if k[0] == s])) for s in sorted({k[0] for k in keys})}
     return r
 
 
@@ -91,15 +76,14 @@ for judge, (fname, rename) in judges.items():
     if ref and ref not in res:
         print(f"\nreference arm {ref} not scored by {judge}, no paired test")
     vocoded = next((a for a in res if kind[a] == "vocoded"), None)
-    print(f"\n== judge {judge}  (triad chance 0.33, pairs chance 0.50)")
-    print(f"{'arm':20s} {'n':>4s}  triad [95% CI]       angry happy surpr | A-H  A-S  H-S  | S-N  5-way | rel  | vs {ref}: b  c  p")
+    top = res[vocoded]["5-way"] - 0.2 if vocoded else 0.0
+    print(f"\n== judge {judge}  (5-way chance 0.20, pairs chance 0.50)")
+    print(f"{'arm':20s} {'n':>4s}  {'5-way [95% CI]':20s}" + "".join(f"{e[:5]:6s}" for e in emotions) + f"| pairs | rel   | vs {ref}: b  c  p")
     for arm, r in res.items():
-        top = res[vocoded]["triad"] - 1 / 3 if vocoded else 0.0
-        rel = (r["triad"] - 1 / 3) / top if top > 0 else float("nan")
-        line = f"{arm:20s} {r['n']:4d}  {r['triad']:.2f} [{r['triad_ci'][0]:.2f}, {r['triad_ci'][1]:.2f}]   "
-        line += " ".join(f"{r['recall'][e]:.2f} " for e in triad) + " | "
-        line += " ".join(f"{v:.2f}" for v in r["pairs"].values()) + " | "
-        line += f"{r['sad-neutral_pair']:.2f} {r['5-way']:.2f}  | {rel:.2f} |"
+        rel = (r["5-way"] - 0.2) / top if top > 0 else float("nan")
+        ci = f"{r['5-way']:.2f} [{r['5-way_ci'][0]:.2f}, {r['5-way_ci'][1]:.2f}]"
+        line = f"{arm:20s} {r['n']:4d}  {ci:20s}" + "".join(f"{r['recall'][e]:<6.2f}" for e in emotions)
+        line += f"| {r['pairs_mean']:.2f}  | {rel:5.2f} |"
         if ref in res and arm != ref:
             keys = res[ref]["hits"].keys() & r["hits"].keys()
             b = sum(r["hits"][k] and not res[ref]["hits"][k] for k in keys)
@@ -108,12 +92,13 @@ for judge, (fname, rename) in judges.items():
             r["vs_ref"] = {"ref": ref, "b": b, "c": c, "p": mcnemar(b, c)}
         r["rel_to_vocoded"] = rel
         print(line)
-        print(f"{'':26s}per speaker: " + "  ".join(f"{s} {v:.2f}" for s, v in r["per_speaker"].items()))
+        print(f"{'':27s}pairs: " + "  ".join(f"{k[:3]}-{k.split('-')[1][:3]} {v:.2f}" for k, v in r["pairs"].items()))
+        print(f"{'':27s}per speaker: " + "  ".join(f"{s} {v:.2f}" for s, v in r["per_speaker"].items()))
     report[judge] = {arm: {k: v for k, v in r.items() if k != "hits"} for arm, r in res.items()}
 ceiling = ev / "wavlm_judge_ceiling.json"
 if ceiling.exists():
-    report["wavlm_ceiling_real_unseen_speakers"] = json.loads(ceiling.read_text(encoding="utf-8"))
-    print("\nwavlm judge on real recordings of unseen speakers:", report["wavlm_ceiling_real_unseen_speakers"])
+    report["wavlm_ceiling_5way"] = json.loads(ceiling.read_text(encoding="utf-8"))["5-way"]
+    print(f"\nwavlm judge on real recordings of unseen speakers: 5-way {report['wavlm_ceiling_5way']:.3f}")
 with open(ev / "report.json", "w", encoding="utf-8") as f:
     json.dump(report, f, indent=1)
 print("\nreport ->", ev / "report.json")
