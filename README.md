@@ -5,7 +5,7 @@ Code for my bachelor's thesis at the Chair of Health Informatics, Technical Univ
 ## Layout
 
 - `F5-TTS/` modified copy of [F5-TTS](https://github.com/SWivid/F5-TTS)
-- `scripts/` data preparation and checkpoint checks
+- `scripts/` data preparation, analyses and evaluation
 - `experiments/` local experiments and tests
 - `cluster/` SLURM job scripts
 
