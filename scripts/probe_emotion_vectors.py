@@ -13,7 +13,7 @@ import torch.nn.functional as F
 ckpt_dir, out = Path(sys.argv[1]), Path(sys.argv[2])
 root = Path("/data/chi-gpu1/ge96xah/data/ESD")
 emotions = ["Neutral", "Angry", "Happy", "Sad", "Surprise"]
-tasks = {"5-way": emotions, "triad": ["Angry", "Happy", "Surprise"], "angry-happy": ["Angry", "Happy"]}
+tasks = {"5-way": emotions, "angry-happy-surprise": ["Angry", "Happy", "Surprise"], "angry-happy": ["Angry", "Happy"]}
 pairs = [("Angry", "Happy"), ("Angry", "Surprise"), ("Happy", "Surprise"), ("Sad", "Neutral")]
 torch.manual_seed(0)
 torch.set_num_threads(8)
@@ -144,15 +144,15 @@ res["separation_raw"] = separation(X)
 res["nearest_centroid_raw"] = {t: nearest_centroid(X, labels) for t, labels in tasks.items()}
 print("separation raw:", {k: round(v["mean"], 2) for k, v in res["separation_raw"].items()}, flush=True)
 
-# how much of the triad difference lies in the high-variance directions that are learned first
+# how much of the difference between angry, happy and surprise lies in the high-variance directions that are learned first
 mu = X[torch.from_numpy(split == "train")].mean(0)
 _, S, Vh = torch.linalg.svd(X[torch.from_numpy(split == "train")] - mu, full_matrices=False)
 share = (S**2).cumsum(0) / (S**2).sum()
-res["triad_from_top_components"] = {}
+res["angry-happy-surprise_from_top_components"] = {}
 for k in [1, 2, 4, 8, 16, 32, 64, 128, 256, 1024]:
-    r = probe((X - mu) @ Vh[:k].T, tasks["triad"], "linear", splits["sentences"])
-    res["triad_from_top_components"][k] = {"acc": r["acc"], "variance_share": share[k - 1].item()}
-    print(f"top {k:4d} components ({share[k - 1].item():.1%} of the variance): triad acc {r['acc']:.3f}", flush=True)
+    r = probe((X - mu) @ Vh[:k].T, tasks["angry-happy-surprise"], "linear", splits["sentences"])
+    res["angry-happy-surprise_from_top_components"][k] = {"acc": r["acc"], "variance_share": share[k - 1].item()}
+    print(f"top {k:4d} components ({share[k - 1].item():.1%} of the variance): angry-happy-surprise acc {r['acc']:.3f}", flush=True)
 
 # what pilot B's emo_proj makes of it, per checkpoint: offsets that are added to every text token
 res["pilot"] = {}

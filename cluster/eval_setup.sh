@@ -7,7 +7,7 @@
 #SBATCH --chdir=/data/chi-gpu1/ge96xah/f5tts
 #SBATCH --output=/nas/student/DavidFrank/f5tts/logs/%x_%A.out
 
-# one-time preparation of the triad evaluation (CPU only), everything on the NAS because /data is nearly full:
+# one-time preparation of the emotion evaluation (CPU only), everything on the NAS because /data is nearly full:
 # an own environment for emotion2vec+, so that funasr cannot touch the F5 environment, and the weights of both judges
 # can be repeated after a failure, finished steps are skipped
 # usage: sbatch eval_setup.sh

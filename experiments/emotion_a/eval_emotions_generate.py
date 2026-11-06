@@ -25,7 +25,7 @@ from f5_tts.model.modules import MelSpec
 #       ckpt     a training checkpoint (online weights) with a neutral prompt and a vector of the target emotion
 #       novec    the same checkpoint without vector: what the emotion-specific length alone gives (lower bound)
 # generated arms get the length of the real recording and one seed per item, shared by all emotions and arms
-# usage: python eval_triad_generate.py <output dir> <real|vocoded|prompt|ckpt|novec> [checkpoint .pt] [--nfe 32] [--guidance 3]
+# usage: python eval_emotions_generate.py <output dir> <real|vocoded|prompt|ckpt|novec> [checkpoint .pt] [--nfe 32] [--guidance 3]
 p = argparse.ArgumentParser()
 p.add_argument("out")
 p.add_argument("arm", choices=["real", "vocoded", "prompt", "ckpt", "novec"])

@@ -6,14 +6,14 @@ from pathlib import Path
 
 import numpy as np
 
-# compares the arms of the emotion evaluation (experiments/emotion_a/eval_triad_generate.py) item by item, for each judge,
+# compares the arms of the emotion evaluation (experiments/emotion_a/eval_emotions_generate.py) item by item, for each judge,
 # always over all five emotions
 #   5-way:    every item decided among the five emotions (chance 0.2), Wilson 95 % interval, recall per emotion
 #   pairs:    same speaker and sentence, emotions a and b: does the a item get more "a" than the b item, and vice versa
 #             (chance 0.5); compares the raw scores, just as a reward would; mean over the ten pairs, each pair below
 #   vs ref:   McNemar on the 5-way hits, b = only this arm right, c = only the reference right
 #   rel:      (5-way - 0.2) / (vocoded - 0.2), the share of what the vocoded recordings reach
-# usage: python eval_triad_report.py <evaluation dir> [reference arm, e.g. pilotB_13095]
+# usage: python eval_emotions_report.py <evaluation dir> [reference arm, e.g. pilotB_13095]
 ev, ref = Path(sys.argv[1]), (sys.argv[2] if len(sys.argv) > 2 else None)
 emotions = ["neutral", "angry", "happy", "sad", "surprise"]
 judges = {"e2v": ("scores_e2v.csv", {"surprise": "surprised"}), "wavlm": ("scores_wavlm.csv", {}), "llm": ("scores_llm.csv", {})}

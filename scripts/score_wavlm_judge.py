@@ -18,7 +18,6 @@ cache, manifests = Path(sys.argv[1]), [Path(m) for m in sys.argv[2:]]
 root = Path("/data/chi-gpu1/ge96xah/data/ESD")
 model_name = "/nas/student/DavidFrank/models/wavlm-large"  # microsoft/wavlm-large, downloaded by cluster/eval_setup.sh
 emotions = ["neutral", "angry", "happy", "sad", "surprise"]
-triad = [1, 2, 4]
 device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.manual_seed(0)
 extractor = AutoFeatureExtractor.from_pretrained(model_name)
@@ -96,11 +95,7 @@ def probs(x, speaker):
 # how well this judge separates the emotions on real recordings of unseen speakers (its ceiling)
 xev, sev, yev = data["evaluation"]
 pev = torch.stack([probs(x, s) for x, s in zip(xev, sev)])
-tri = torch.tensor([int(y) in triad for y in yev])
-ceiling = {
-    "5-way": (pev.argmax(1) == yev).float().mean().item(),
-    "triad": (torch.tensor(triad)[pev[tri][:, triad].argmax(1)] == yev[tri]).float().mean().item(),
-}
+ceiling = {"5-way": (pev.argmax(1) == yev).float().mean().item()}
 print("wavlm judge on real evaluation recordings of unseen speakers:", {k: round(v, 3) for k, v in ceiling.items()}, flush=True)
 with open(cache / "wavlm_judge_ceiling.json", "w", encoding="utf-8") as f:
     json.dump(ceiling, f, indent=1)
