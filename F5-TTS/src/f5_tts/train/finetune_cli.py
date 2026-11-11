@@ -32,7 +32,9 @@ def parse_args():
     )
     parser.add_argument("--dataset_name", type=str, default="Emilia_ZH_EN", help="Name of the dataset to use")
     parser.add_argument("--learning_rate", type=float, default=1e-5, help="Learning rate for training")
-    parser.add_argument("--emo_lr_scale", type=float, default=1.0, help="Learning rate factor for emo_proj")
+    parser.add_argument(
+        "--emo_lr_scale", type=float, default=1.0, help="Learning rate factor for the emotion projections (emo_proj, emo_proj_frame)"
+    )
     parser.add_argument("--emo_drop_prob", type=float, default=0.0, help="Probability to drop only the emotion embedding")
     parser.add_argument("--ema_on_cpu", action="store_true", help="Keep the EMA copy in CPU memory")
     parser.add_argument("--constant_lr", action="store_true", help="Keep the learning rate constant after warm-up")
@@ -84,6 +86,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    print("options:", vars(args))  # the job log is the only record of how a run was started
 
     checkpoint_path = str(files("f5_tts").joinpath(f"../../ckpts/{args.dataset_name}"))
 

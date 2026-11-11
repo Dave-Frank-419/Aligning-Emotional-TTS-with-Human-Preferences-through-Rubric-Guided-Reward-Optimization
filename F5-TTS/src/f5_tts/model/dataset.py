@@ -321,6 +321,8 @@ def load_dataset(
         if os.path.exists(f"{rel_data_path}/pairs.json"):  # optional cross-emotion prompts, see scripts/make_xprompt_pairs.py
             with open(f"{rel_data_path}/pairs.json", "r", encoding="utf-8") as f:
                 pairs = json.load(f)
+        # without pairs.json the prompt is the unmasked rest of the target and the vector the target's own (pilot 1)
+        print(f"cross-emotion prompts: {len(pairs)} targets" if pairs is not None else f"no pairs.json in {rel_data_path}: no cross-emotion prompts")
         train_dataset = CustomDataset(
             train_dataset,
             durations=durations,
