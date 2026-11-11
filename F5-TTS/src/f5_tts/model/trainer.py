@@ -53,7 +53,7 @@ class Trainer:
         is_local_vocoder: bool = False,  # use local path vocoder
         local_vocoder_path: str = "",  # local vocoder path
         model_cfg_dict: dict = dict(),  # training config
-        emo_lr_scale: float = 1.0,  # learning rate factor for emo_proj
+        emo_lr_scale: float = 1.0,  # learning rate factor for the emotion projections (emo_proj and emo_proj_frame)
         ema_on_cpu: bool = False,  # keep the EMA copy in CPU memory, frees about 1.3 GB on the GPU
         constant_lr: bool = False,  # keep the learning rate at its peak after warm-up instead of decaying it to 0
     ):
@@ -141,7 +141,8 @@ class Trainer:
         self.duration_predictor = duration_predictor
 
         params = model.parameters()
-        if emo_lr_scale != 1.0:  # new layer starts at zero, give it its own learning rate
+        # the emotion projections (every parameter with emo_proj in its name) start at zero and get their own learning rate
+        if emo_lr_scale != 1.0:
             emo = [p for n, p in model.named_parameters() if "emo_proj" in n]
             rest = [p for n, p in model.named_parameters() if "emo_proj" not in n]
             params = [{"params": rest}, {"params": emo, "lr": learning_rate * emo_lr_scale}]
@@ -221,7 +222,11 @@ class Trainer:
                 )[-1]
             else:
                 # If no training checkpoints, use pretrained model
-                latest_checkpoint = next(f for f in all_checkpoints if f.startswith("pretrained_"))
+                pretrained = [f for f in all_checkpoints if f.startswith("pretrained_")]
+                # os.listdir has no defined order: with two such files the start weights would be arbitrary
+                assert len(pretrained) == 1, f"{self.checkpoint_path} must hold exactly one pretrained_* file, found {pretrained}"
+                latest_checkpoint = pretrained[0]
+        print(f"loading checkpoint {self.checkpoint_path}/{latest_checkpoint}")
 
         if latest_checkpoint.endswith(".safetensors"):  # always a pretrained checkpoint
             from safetensors.torch import load_file
@@ -240,7 +245,7 @@ class Trainer:
                 del checkpoint["ema_model_state_dict"][key]
 
         if self.is_main:
-            # pretrained ckpt has no emo_proj
+            # a start file may lack the emotion projections; its keys are checked below, on the online weights
             self.ema_model.load_state_dict(
                 checkpoint["ema_model_state_dict"], strict=not latest_checkpoint.startswith("pretrained_")
             )
@@ -269,8 +274,13 @@ class Trainer:
                 for k, v in checkpoint["ema_model_state_dict"].items()
                 if k not in ["initted", "update", "step"]
             }
-            # pretrained ckpt has no emo_proj
-            self.accelerator.unwrap_model(self.model).load_state_dict(checkpoint["model_state_dict"], strict=False)
+            # start weights may lack the emotion projections and nothing else (F5 base: both; a run trained before
+            # emo_proj_frame existed: the second); a missing projection keeps its zero init
+            model = self.accelerator.unwrap_model(self.model)
+            missing, unexpected = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+            assert not unexpected and all("emo_proj" in k for k in missing), f"missing {missing}, unexpected {unexpected}"
+            emo = {n: round(p.abs().mean().item(), 6) for n, p in model.named_parameters() if "emo_proj" in n and "weight" in n}
+            print(f"start weights without {missing}; mean abs weight of the emotion projections: {emo}")
             update = 0
 
         del checkpoint
