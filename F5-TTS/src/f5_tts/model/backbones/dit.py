@@ -39,6 +39,9 @@ class TextEmbedding(nn.Module):
         self.emo_proj = nn.Linear(1024, text_dim)  # utterance-level emotion embedding, emotional-vits style
         nn.init.zeros_(self.emo_proj.weight)  # zero init, starts as the pretrained model
         nn.init.zeros_(self.emo_proj.bias)
+        self.emo_proj_frame = nn.Linear(1024, text_dim)  # second emotion input: the same vector at every frame
+        nn.init.zeros_(self.emo_proj_frame.weight)  # zero init: weights trained without it give the same output
+        nn.init.zeros_(self.emo_proj_frame.bias)
 
         self.mask_padding = mask_padding  # mask filler and batch padding tokens or not
         self.average_upsampling = average_upsampling  # zipvoice-style text late average upsampling (after text encoder)
@@ -110,7 +113,11 @@ class TextEmbedding(nn.Module):
             text = torch.zeros_like(text)
 
         text = self.text_embed(text)  # b n -> b n d
-        if emo is not None and not drop_text:  # add emotion to every position, dropped together with text for cfg
+        # first emotion input (emotional-vits style): added to every position here, but mask_padding and the text blocks
+        # zero the filler positions again below, so it survives only at the character positions (in the cross-prompt
+        # training sequences about 17 % of the positions, almost never one in the part to be generated);
+        # dropped together with text for cfg
+        if emo is not None and not drop_text:
             text = text + self.emo_proj(emo.to(device=text.device, dtype=text.dtype)).unsqueeze(1)
         if valid_pos_mask is not None:
             # Keep short-sample tail strictly zero (equivalent to per-sample pad_sequence(..., 0)).
@@ -140,6 +147,15 @@ class TextEmbedding(nn.Module):
                 target_lens = torch.full((text.shape[0],), int(seq_len), device=text.device, dtype=torch.long)
 
             text = self.average_upsample_text_by_mask(text, ~text_mask, target_lens)
+
+        # second emotion input: added after all masking, so every frame of the utterance (prompt and part to be
+        # generated) carries it directly instead of only by attention from the character positions;
+        # dropped together with text for cfg, like the first one
+        if emo is not None and not drop_text:
+            frame_emo = self.emo_proj_frame(emo.to(device=text.device, dtype=text.dtype)).unsqueeze(1)  # b 1 d
+            if valid_pos_mask is not None:  # batch padding stays zero
+                frame_emo = frame_emo * valid_pos_mask.unsqueeze(-1).to(frame_emo.dtype)
+            text = text + frame_emo
 
         return text
 
