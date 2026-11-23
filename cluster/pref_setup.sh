@@ -28,6 +28,7 @@ CODE=/data/chi-gpu1/ge96xah/f5tts/thesis
 ESD=/data/chi-gpu1/ge96xah/data/ESD
 direnv allow . && eval "$(direnv export bash)" || exit 1  # uv and the interpreter of the F5 environment
 PYV=$VIRTUAL_ENV/bin/python
+umask 022  # files of a job readable by the next: the NAS reports another owner for them, so a private umask locks them out
 unset TRANSFORMERS_CACHE HUGGINGFACE_HUB_CACHE  # a cache folder of the login shell (sbatch passes its environment on) must not win over the NAS
 export UV_CACHE_DIR=$ENVS/uv_cache HF_HOME=$N/hf_cache HF_HUB_CACHE=$N/hf_cache/hub HF_XET_CACHE=$N/hf_cache/xet
 export PYTHONPATH=$CODE/F5-TTS/src  # the F5 code of this repository, and nothing of the F5 environment of the login shell
@@ -55,6 +56,12 @@ uv pip install --python $ENVS/jev/bin/python transformers==4.57.6 peft==0.17.1 o
 $ENVS/jev/bin/python -I -c "import torch, transformers, peft, opensmile, audiojev_inference; print('jev', torch.__version__, transformers.__version__, peft.__version__)"
 
 # models: AudioJev at the local revision, and what F5 and the word count load from Hugging Face
+# a download made under a private umask is not readable by a later job (the NAS reports another owner): try to open it
+# up, else set it aside and download again
+if [ -e $M/AudioJev ] && ! [ -r $M/AudioJev/model.safetensors.index.json ]; then
+  chmod -R a+rX $M/AudioJev 2>/dev/null || true
+  [ -r $M/AudioJev/model.safetensors.index.json ] || mv $M/AudioJev $M/AudioJev_unreadable_$(date +%Y%m%d_%H%M%S)
+fi
 [ -s $M/AudioJev/model.safetensors.index.json ] || $ENVS/jev/bin/python -I -c "from huggingface_hub import snapshot_download; snapshot_download('shlv/AudioJev', revision='d23dddb9669021bb2ef8cae5c07fe24b3e35702d', local_dir='$M/AudioJev')"
 $ENVS/f5bw/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('openai/whisper-base'); snapshot_download('charactr/vocos-mel-24khz'); from cached_path import cached_path; print(cached_path('hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors'))"
 du -sh $M/AudioJev $HF_HOME
