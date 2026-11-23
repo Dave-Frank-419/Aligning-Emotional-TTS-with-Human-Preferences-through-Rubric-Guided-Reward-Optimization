@@ -26,7 +26,9 @@ ESD=/data/chi-gpu1/ge96xah/data/ESD
 F5=$N/envs/f5bw/bin/python
 JEV=$N/envs/jev/bin/python
 STRENGTHS=angry=0.5,happy=2,sad=1.5,surprise=1
-export HF_HOME=$N/hf_cache HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONUNBUFFERED=1
+unset TRANSFORMERS_CACHE HUGGINGFACE_HUB_CACHE  # a cache folder of the login shell (sbatch passes its environment on) must not win over the NAS
+export HF_HOME=$N/hf_cache HF_HUB_CACHE=$N/hf_cache/hub HF_XET_CACHE=$N/hf_cache/xet HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONUNBUFFERED=1
+export PYTHONPATH=$CODE/F5-TTS/src  # the F5 code of this repository, and nothing of the login shell's environment
 set -ex
 nvidia-smi --query-gpu=name,memory.total --format=csv
 git -C $CODE log -1 --oneline

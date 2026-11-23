@@ -26,11 +26,14 @@ ESD=/data/chi-gpu1/ge96xah/data/ESD
 F5=$N/envs/f5bw/bin/python
 JEV=$N/envs/jev/bin/python
 S=$PREF/smoke_$SLURM_JOB_ID
-export HF_HOME=$N/hf_cache HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONUNBUFFERED=1
+unset TRANSFORMERS_CACHE HUGGINGFACE_HUB_CACHE  # a cache folder of the login shell (sbatch passes its environment on) must not win over the NAS
+export HF_HOME=$N/hf_cache HF_HUB_CACHE=$N/hf_cache/hub HF_XET_CACHE=$N/hf_cache/xet HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONUNBUFFERED=1
+export PYTHONPATH=$CODE/F5-TTS/src  # the F5 code of this repository, and nothing of the login shell's environment
 set -ex
 nvidia-smi --query-gpu=name,memory.total,compute_cap --format=csv
 git -C $CODE log -1 --oneline
 $F5 -c "import torch; x = torch.randn(512, 512, device='cuda'); print('f5bw', torch.cuda.get_device_name(0), float((x @ x).sum()))"
+$F5 -c "import torch, f5_tts; print('f5bw imports torch', torch.__version__, 'from', torch.__file__, 'and F5 from', list(f5_tts.__path__))"
 $JEV -I -c "import torch; x = torch.randn(512, 512, device='cuda', dtype=torch.bfloat16); print('jev', torch.cuda.get_device_name(0), float((x @ x).float().sum()))"
 $F5 $P/pack_pairs.py --check $PREF  # the unpacked archive is complete and unchanged
 

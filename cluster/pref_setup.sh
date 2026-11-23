@@ -28,7 +28,9 @@ CODE=/data/chi-gpu1/ge96xah/f5tts/thesis
 ESD=/data/chi-gpu1/ge96xah/data/ESD
 direnv allow . && eval "$(direnv export bash)" || exit 1  # uv and the interpreter of the F5 environment
 PYV=$VIRTUAL_ENV/bin/python
-export UV_CACHE_DIR=$ENVS/uv_cache HF_HOME=$N/hf_cache
+unset TRANSFORMERS_CACHE HUGGINGFACE_HUB_CACHE  # a cache folder of the login shell (sbatch passes its environment on) must not win over the NAS
+export UV_CACHE_DIR=$ENVS/uv_cache HF_HOME=$N/hf_cache HF_HUB_CACHE=$N/hf_cache/hub HF_XET_CACHE=$N/hf_cache/xet
+export PYTHONPATH=$CODE/F5-TTS/src  # the F5 code of this repository, and nothing of the F5 environment of the login shell
 set -ex  # stop at the first error, every step is visible in the log
 mkdir -p $PREF $HF_HOME
 git -C $CODE log -1 --oneline

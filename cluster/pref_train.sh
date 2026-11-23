@@ -38,7 +38,9 @@ STRENGTHS=angry=0.5,happy=2,sad=1.5,surprise=1
 T=$PREF/tables
 E=$PREF/eval
 RUN=$PREF/runs/$NAME
-export HF_HOME=$N/hf_cache HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONUNBUFFERED=1
+unset TRANSFORMERS_CACHE HUGGINGFACE_HUB_CACHE  # a cache folder of the login shell (sbatch passes its environment on) must not win over the NAS
+export HF_HOME=$N/hf_cache HF_HUB_CACHE=$N/hf_cache/hub HF_XET_CACHE=$N/hf_cache/xet HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONUNBUFFERED=1
+export PYTHONPATH=$CODE/F5-TTS/src  # the F5 code of this repository, and nothing of the login shell's environment
 export PYTORCH_CUDA_ALLOC_CONF=garbage_collection_threshold:0.8,max_split_size_mb:128  # as every local training
 nvidia-smi --query-gpu=name,memory.total --format=csv
 git -C $CODE log -1 --oneline
