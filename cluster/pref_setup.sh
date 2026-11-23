@@ -46,8 +46,10 @@ $ENVS/f5bw/bin/python -c "import torch, torchaudio, transformers, f5_tts; print(
 # jev: the versions of the local environment that scored every clip so far
 [ -e $ENVS/jev/bin/python ] || uv venv $ENVS/jev --python $PYV
 uv pip install --python $ENVS/jev/bin/python torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+# the inference package as the archive of the pinned commit, not by git: git refuses the NAS cache folder, whose owner
+# the NAS reports as another user ("dubious ownership"), and the archive needs no git and no change of its config
 uv pip install --python $ENVS/jev/bin/python transformers==4.57.6 peft==0.17.1 opensmile==2.6.0 soundfile scipy pandas \
-  "git+https://github.com/SihanLv/AudioJev-Inference@8eeeab5e77d2c410fd6058e7bdf2b4125f11903e"
+  "audiojev-inference @ https://github.com/SihanLv/AudioJev-Inference/archive/8eeeab5e77d2c410fd6058e7bdf2b4125f11903e.tar.gz"
 $ENVS/jev/bin/python -I -c "import torch, transformers, peft, opensmile, audiojev_inference; print('jev', torch.__version__, transformers.__version__, peft.__version__)"
 
 # models: AudioJev at the local revision, and what F5 and the word count load from Hugging Face
