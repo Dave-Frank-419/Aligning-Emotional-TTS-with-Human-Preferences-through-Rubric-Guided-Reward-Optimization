@@ -23,8 +23,10 @@ from scipy.signal import butter, resample_poly, sosfiltfilt
 #          for angry than for sad); the spectral cues above 500 Hz are gone either way
 # --adapter <dir>: AudioJev with a LoRA adapter from train_audiojev_lora.py (option B test 2); "_" and the adapter's folder
 #          name are appended to the score file names, e.g. scores_jevchoice_lora4.csv
-# AudioJev needs BF16 and its own venv (torch 2.8, transformers 4.57.6), so it runs on the local RTX 4070, not the TITAN X
-# the manifests hold cluster paths: the clips are read from the local copy, the scores keep the manifest path for the report
+# AudioJev needs BF16 and its own venv (torch 2.8, transformers 4.57.6), so it runs on cards with BF16 (the local RTX
+# 4070, or the cluster's RTX PRO 4000 Blackwell in the environment jev of cluster/pref_setup.sh), not on the TITAN X
+# the manifests may hold the paths of another machine: the clips are read with <cluster prefix> replaced by <local
+# prefix>, the scores keep the manifest path for the report (where the clips lie where the manifest says, both are /nas)
 # usage: python score_audiojev.py [--adapter <dir>] [--units | --relative <ESD root> | --tone | --lowpass | --tone-lowpass] <model dir>
 #        <cluster prefix> <local prefix> <manifest.csv> [...] -> next to each manifest: scores_jev.csv and scores_jevchoice.csv
 #        (with the variant's name appended, e.g. scores_jevchoicetone.csv), scores_jevunits.csv or scores_jevrelative.csv

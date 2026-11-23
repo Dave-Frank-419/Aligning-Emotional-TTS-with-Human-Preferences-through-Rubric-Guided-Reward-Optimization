@@ -32,7 +32,7 @@ Changes: an utterance-level emotion embedding (1024-d) is projected to the text 
 4. `train_dpo.py` trains on the pairs, with the SFT term and an anchor that holds the velocity on neutral clips at the start model's. It saves weights and a resumable state, and stops when a file `STOP` appears in its run folder.
 5. `generate.py`, `level_match.py` and the scorers produce a saved state's evaluation set, and `evaluate.py` reads it against the start model with the same emotion input: the effect in units of the emotion input's strength, identity, the word errors of neutral and of the emotions, and the share of clips with an overdone pitch. It writes `STOP` when a stop rule fires.
 
-Every script describes its method and its choices in its head comment.
+Every script describes its method and its choices in its head comment. On the cluster the stage runs on the RTX PRO 4000 Blackwell cards: `cluster/pref_setup.sh` builds the two environments it needs and fetches the models, `pref_smoke.sh` tests them, `pref_ref.sh` makes the reference, and `pref_train.sh` runs a training with its evaluations; `pack_pairs.py` carries pairs made elsewhere to the cluster, and `weights_check.py` checks that the start weights are the same tensors there.
 
 ## Not included
 
