@@ -58,13 +58,16 @@ $ENVS/jev/bin/python -I -c "import torch, transformers, peft, opensmile, audioje
 # models: AudioJev at the local revision, and what F5 and the word count load from Hugging Face
 # a download made under a private umask is not readable by a later job (the NAS reports another owner): try to open it
 # up, else set it aside and download again
-if [ -e $M/AudioJev ] && ! [ -r $M/AudioJev/model.safetensors.index.json ]; then
+unreadable() { find "$1" -type f ! -readable -print -quit 2>/dev/null; }  # the first file of a folder this job cannot read, if any
+if [ -e $M/AudioJev ] && [ -n "$(unreadable $M/AudioJev)" ]; then  # every file, not one: a partial chmod leaves some locked
   chmod -R a+rX $M/AudioJev 2>/dev/null || true
-  [ -r $M/AudioJev/model.safetensors.index.json ] || mv $M/AudioJev $M/AudioJev_unreadable_$(date +%Y%m%d_%H%M%S)
+  [ -z "$(unreadable $M/AudioJev)" ] || mv $M/AudioJev $M/AudioJev_unreadable_$(date +%Y%m%d_%H%M%S)
 fi
 [ -s $M/AudioJev/model.safetensors.index.json ] || $ENVS/jev/bin/python -I -c "from huggingface_hub import snapshot_download; snapshot_download('shlv/AudioJev', revision='d23dddb9669021bb2ef8cae5c07fe24b3e35702d', local_dir='$M/AudioJev')"
+[ -z "$(unreadable $M/AudioJev)" ] || { echo "a file of AudioJev is still not readable: $(unreadable $M/AudioJev)"; exit 1; }
 $ENVS/f5bw/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('openai/whisper-base'); snapshot_download('charactr/vocos-mel-24khz'); from cached_path import cached_path; print(cached_path('hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors'))"
-du -sh $M/AudioJev $HF_HOME
+du -sh $M/AudioJev $HF_HOME || true  # information only
+[ -z "$(unreadable $M/adapters/lora4)" ] || { echo "a file of the adapter is not readable for jobs: run chmod -R a+rX $M/adapters/lora4 in the login shell"; exit 1; }
 
 # the adapter of the reward's classifier, copied from the PC: the file every local score used
 echo "ae9e3484c22b929fdb4a78d5d026c35d03fc4169fe907ae6af342ae9beb30e02  $M/adapters/lora4/adapter_model.safetensors" | sha256sum -c
@@ -77,3 +80,6 @@ grep -q "^606d2e3f2cabc19a139ce45dfbe7f799471c031ce4de1fe1284bf54f912586ce " $PR
 # the pitch frame of the real recordings (score_pitch.py frame), for the guard of the pairs and the evaluation
 [ -s $PREF/frame.csv ] || $ENVS/jev/bin/python -I $CODE/experiments/preference/score_pitch.py frame $PREF/frame.csv --esd $ESD
 echo "setup done"
+# the next two jobs, one card each: the test of both environments, and the reference of the evaluation
+set +e
+sbatch $CODE/cluster/pref_smoke.sh && sbatch $CODE/cluster/pref_ref.sh || echo "could not submit from inside a job: submit pref_smoke.sh and pref_ref.sh from the login shell"
