@@ -6,7 +6,7 @@ Code for my bachelor's thesis at the Chair of Health Informatics, Technical Univ
 
 - `F5-TTS/` modified copy of [F5-TTS](https://github.com/SWivid/F5-TTS)
 - `scripts/` data preparation, analyses and evaluation
-- `experiments/` local experiments and tests
+- `experiments/` experiments: the emotion evaluation (`emotion_a/`) and the preference stage (`preference/`)
 - `cluster/` SLURM job scripts
 
 ## F5-TTS
@@ -21,6 +21,18 @@ Changes: an utterance-level emotion embedding (1024-d) is projected to the text 
 - `src/f5_tts/model/trainer.py`
 - `src/f5_tts/infer/utils_infer.py`
 - `src/f5_tts/train/finetune_cli.py`
+
+## Preference stage
+
+`experiments/preference/` trains the fine-tuned model on pairs of its own samples (Flow-DPO), with a reward that two independent emotion classifiers must agree on. The order of a run:
+
+1. `generate.py` writes a pool of the model's own clips on training sentences, several seeds per item, with the emotion input of `emotion_input.py`: the emotion vector of a source recording moved along what is unique to the intended emotion, by a strength per emotion chosen by ear.
+2. `scripts/score_audiojev.py` with a LoRA adapter, `scripts/score_wavlm_judge.py`, `score_words.py` and `score_pitch.py` measure every clip: the intensity and identity of the emotion by both classifiers, the word errors (whisper-base) and the mean pitch against the speaker's real recordings.
+3. `make_pairs.py` picks per item the pair whose winner both classifiers hear as more intense, with an identity that is not weaker, no more word errors and a pitch not far above the speaker's real range, and writes a control of random pairs of the same items. `make_anchor_table.py` lists the start model's own neutral clips for the anchor.
+4. `train_dpo.py` trains on the pairs, with the SFT term and an anchor that holds the velocity on neutral clips at the start model's. It saves weights and a resumable state, and stops when a file `STOP` appears in its run folder.
+5. `generate.py`, `level_match.py` and the scorers produce a saved state's evaluation set, and `evaluate.py` reads it against the start model with the same emotion input: the effect in units of the emotion input's strength, identity, the word errors of neutral and of the emotions, and the share of clips with an overdone pitch. It writes `STOP` when a stop rule fires.
+
+Every script describes its method and its choices in its head comment.
 
 ## Not included
 
