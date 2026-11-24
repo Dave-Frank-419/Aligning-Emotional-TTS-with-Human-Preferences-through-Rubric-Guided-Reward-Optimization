@@ -21,7 +21,8 @@
 # model's own neutral clips (lambda 800, 8 per update), the SFT term, learning rate 1e-5, warm-up 75, 8 pairs per emotion
 # and update. A part that is done (its weights and its evaluation exist) is not done again; the trainer resumes from
 # its state, so the job can be submitted again after an interruption.
-# usage: sbatch thesis/cluster/pref_train.sh <run name> <reward|random> [<name of the reward's run, for random>]
+# usage: [BETA=100] [ANCHOR_WEIGHT=800] sbatch thesis/cluster/pref_train.sh <run name> <reward|random> [<name of the reward's run, for random>]
+#        BETA and ANCHOR_WEIGHT set the DPO term's beta and the anchor term's weight (default: those of big1)
 set -o pipefail  # a failing step before a pipe stops the job
 [ $# -ge 2 ] || { echo "usage: sbatch pref_train.sh <run name> <reward|random> [<reward run to follow>]"; exit 1; }
 NAME=$1; KIND=$2; FOLLOW=${3:-}
@@ -35,6 +36,8 @@ ESD=/data/chi-gpu1/ge96xah/data/ESD
 F5=$N/envs/f5bw/bin/python
 JEV=$N/envs/jev/bin/python
 STRENGTHS=angry=0.5,happy=2,sad=1.5,surprise=1
+BETA=${BETA:-100}  # the DPO term's beta; big1: 100 (sbatch passes the submitting shell's environment)
+ANCHOR_WEIGHT=${ANCHOR_WEIGHT:-800}  # the anchor term's weight; big1: 800
 T=$PREF/tables
 E=$PREF/eval
 RUN=$PREF/runs/$NAME
@@ -46,6 +49,7 @@ export PYTORCH_CUDA_ALLOC_CONF=garbage_collection_threshold:0.8,max_split_size_m
 nvidia-smi --query-gpu=name,memory.total --format=csv
 git -C $CODE log -1 --oneline
 git -C $CODE status --short --untracked-files=no  # uncommitted changes to the code of this run (no line = none)
+echo "beta $BETA, anchor weight $ANCHOR_WEIGHT"
 TABLES=$T/pairs${SUF}_angry.csv,$T/pairs${SUF}_happy.csv,$T/pairs${SUF}_sad.csv,$T/pairs${SUF}_surprise.csv
 for f in ${TABLES//,/ } $T/anchor_neutral.csv $PREF/start_36666_online.pt $PREF/frame.csv $E/labelcal/s3/pitch.csv; do
   [ -s $f ] || { echo "missing: $f (pref_setup.sh, pref_ref.sh, and the unpacked pairs come first)"; exit 1; }
@@ -60,8 +64,8 @@ for STEP in 300 600 900 1200 1500; do
   if [ ! -s $RUN/model_$STEP.pt ]; then
     RES=""
     [ -s $RUN/state.pt ] && RES=--resume
-    $F5 $P/train_dpo.py --run $RUN --start $PREF/start_36666_online.pt --dataset ESD_en_xprompt1_cont --esd $ESD --pairs $TABLES --beta 100 \
-      --steps $STEP --save $STEP --state-every 100 --warmup 75 --pairs-per-step 8 --level-match --anchor $T/anchor_neutral.csv --anchor-weight 800 \
+    $F5 $P/train_dpo.py --run $RUN --start $PREF/start_36666_online.pt --dataset ESD_en_xprompt1_cont --esd $ESD --pairs $TABLES --beta $BETA \
+      --steps $STEP --save $STEP --state-every 100 --warmup 75 --pairs-per-step 8 --level-match --anchor $T/anchor_neutral.csv --anchor-weight $ANCHOR_WEIGHT \
       --anchor-items 8 --val-every 50 --val-max 12 --mem-gb 20 $RES || { echo "$NAME: training failed at the part up to $STEP"; exit 1; }
     [ -s $RUN/model_$STEP.pt ] || { echo "$NAME: no weights after the part up to $STEP (stopped?)"; exit 1; }
   fi
